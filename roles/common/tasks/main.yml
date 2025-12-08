@@ -1,0 +1,15 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Create application directory
+  file:
+    path: "{{ app_directory }}"
+    state: directory
+    mode: '0755'
+
+- name: Install required packages
+  apt:
+    name: "{{ common_packages }}"
+    state: present

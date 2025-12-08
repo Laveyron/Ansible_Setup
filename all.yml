@@ -1,0 +1,10 @@
+---
+- name: Setup common components on all nodes
+  hosts: all
+  become: yes
+  gather_facts: yes
+  roles:
+    - common
+    - docker
+- import_playbook: master.yml
+- import_playbook: worker.yml

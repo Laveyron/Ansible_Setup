@@ -1,0 +1,8 @@
+---
+worker_repo_url: https://github.com/dttrung257/agent_simulation_worker
+worker_repo_name: agent_simulation_worker
+worker_repo_dest: "{{ app_directory }}/{{ worker_repo_name }}"
+gama_install_directory: "{{ worker_repo_dest }}/gama"
+gama_platform_path: "{{ gama_install_directory }}/gama-platform"
+
+cluster_config_path: "{{ worker_repo_dest }}/src/main/resources/cluster-config.yml"

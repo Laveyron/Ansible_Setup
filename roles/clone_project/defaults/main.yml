@@ -1,0 +1,8 @@
+---
+projects_repo_url: "https://github.com/Laveyron/ASF_Network.git"
+projects_repo_branch: "main"
+projects_destination: ""
+sync_method: ""
+local_projects_path:  "/Users/scott/DATN/ASF_Network/"
+rsync_delete: false
+

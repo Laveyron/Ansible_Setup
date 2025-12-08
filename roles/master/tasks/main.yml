@@ -1,0 +1,171 @@
+---
+- name: Clone or update agent simulation API repository
+  git:
+    repo: "{{ master_repo_url }}"
+    dest: "{{ master_repo_dest }}"
+    version: develop
+    force: yes
+
+- name: Fetch latest changes
+  shell: |
+    git fetch origin develop
+    git reset --hard origin/develop
+  args:
+    chdir: "{{ master_repo_dest }}"
+  register: git_update
+  changed_when: git_update.rc == 0
+
+- name: Install GAMA for master
+  include_role:
+    name: gama
+  vars:
+    gama_install_directory: "{{ master_repo_dest }}/gama"
+
+- name: Create cluster config file for master
+  template:
+    src: ../../common/templates/cluster-config.yml.j2
+    dest: "{{ cluster_config_path }}"
+    mode: '0644'
+
+- name: Create .env file for master
+  template:
+    src: master.env.j2
+    dest: "{{ master_repo_dest }}/.env"
+    mode: '0644'
+
+- name: Build and start Docker containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ master_repo_dest }}"
+    build: always
+    state: present
+  environment:
+    DOCKER_BUILDKIT: "{{ docker_buildkit }}"
+    GAMA_PATH: "{{ gama_platform_path }}"
+
+- name: Set permissions on gama-headless.sh in ags_dev_api container
+  community.docker.docker_container_exec:
+    container: ags_dev_api
+    command: chmod 777 /opt/gama-platform/headless/gama-headless.sh
+  register: chmod_result
+  failed_when: chmod_result.rc != 0
+
+# Frontend setup
+- name: Clone or update frontend repository
+  git:
+    repo: "{{ frontend_repo_url }}"
+    dest: "{{ frontend_repo_dest }}"
+    version: master
+    force: yes
+
+- name: Fetch latest changes for frontend
+  shell: |
+    git fetch origin master
+    git reset --hard origin/master
+  args:
+    chdir: "{{ frontend_repo_dest }}"
+  register: git_update_frontend
+  changed_when: git_update_frontend.rc == 0
+
+- name: Check if NVM is installed
+  stat:
+    path: "{{ ansible_env.HOME }}/.nvm/nvm.sh"
+  register: nvm_installed
+
+- name: Download and install NVM
+  shell: |
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{{ nvm_version }}/install.sh | bash
+  args:
+    creates: "{{ ansible_env.HOME }}/.nvm/nvm.sh"
+  when: not nvm_installed.stat.exists
+
+- name: Install Node.js using NVM
+  shell: |
+    export NVM_DIR="{{ ansible_env.HOME }}/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm install {{ node_version }}
+    nvm use {{ node_version }}
+  args:
+    executable: /bin/bash
+    creates: "{{ ansible_env.HOME }}/.nvm/versions/node/v{{ node_version }}"
+
+- name: Create frontend .env file
+  template:
+    src: frontend.env.j2
+    dest: "{{ frontend_repo_dest }}/.env"
+    mode: '0644'
+
+- name: Install npm dependencies
+  shell: |
+    export NVM_DIR="{{ ansible_env.HOME }}/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm use {{ node_version }}
+    npm install
+  args:
+    executable: /bin/bash
+    chdir: "{{ frontend_repo_dest }}"
+
+- name: Build frontend
+  shell: |
+    export NVM_DIR="{{ ansible_env.HOME }}/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm use {{ node_version }}
+    npm run build
+  args:
+    executable: /bin/bash
+    chdir: "{{ frontend_repo_dest }}"
+
+- name: Remove old build directory if exists
+  file:
+    path: "{{ frontend_build_dest }}"
+    state: absent
+
+- name: Move build directory to web root
+  command: mv "{{ frontend_repo_dest }}/build" "{{ frontend_build_dest }}"
+  args:
+    creates: "{{ frontend_build_dest }}"
+
+# Nginx setup
+- name: Install nginx
+  apt:
+    name: nginx
+    state: present
+    update_cache: yes
+
+- name: Create nginx configuration
+  template:
+    src: nginx.conf.j2
+    dest: "/etc/nginx/sites-available/{{ nginx_config_name }}"
+    mode: '0644'
+
+- name: Remove default nginx site
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+
+- name: Enable nginx site
+  file:
+    src: "/etc/nginx/sites-available/{{ nginx_config_name }}"
+    dest: "/etc/nginx/sites-enabled/{{ nginx_config_name }}"
+    state: link
+
+- name: Test nginx configuration
+  command: nginx -t
+  register: nginx_test
+  changed_when: false
+
+- name: Reload nginx
+  systemd:
+    name: nginx
+    state: reloaded
+    enabled: yes
+
+- name: Display master setup completion
+  debug:
+    msg:
+      - "Master setup completed successfully"
+      - "API Repository: {{ master_repo_name }}"
+      - "API Location: {{ master_repo_dest }}"
+      - "Frontend Location: {{ frontend_build_dest }}"
+      - "GAMA_PATH: {{ gama_platform_path }}"
+      - "Node Name: {{ cluster_node_name }}"
+      - "Nginx config: {{ nginx_config_name }}"

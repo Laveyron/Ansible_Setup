@@ -1,0 +1,34 @@
+---
+- name: Sync projects to all nodes
+  hosts: all
+  become: yes
+  gather_facts: no
+  vars:
+    master_repo_dest: /var/www/html/agent_simulation_api
+    worker_repo_dest: /var/www/html/agent_simulation_worker
+    sync_method: rsync
+  tasks:
+    - name: Clone projects to master
+      include_role:
+        name: clone_project
+      vars:
+        projects_destination: "{{ master_repo_dest }}/projects"
+      when: "'master' in group_names"
+    
+    - name: Clone projects to worker
+      include_role:
+        name: clone_project
+      vars:
+        projects_destination: "{{ worker_repo_dest }}/projects"
+      when: "'worker' in group_names"
+
+- name: Import project to database
+  hosts: master
+  become: yes
+  gather_facts: no
+  
+  tasks:
+    - name: Run import_project role
+      include_role:
+        name: import_project
+      when: not list_only | default(false)

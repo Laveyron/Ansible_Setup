@@ -1,0 +1,59 @@
+---
+- name: Clone or update agent simulation worker repository
+  git:
+    repo: "{{ worker_repo_url }}"
+    dest: "{{ worker_repo_dest }}"
+    version: develop
+    force: yes
+
+- name: Install GAMA for worker
+  include_role:
+    name: gama
+  vars:
+    gama_install_directory: "{{ worker_repo_dest }}/gama"
+
+- name: Fetch latest changes
+  shell: |
+    git fetch origin develop
+    git reset --hard origin/develop
+  args:
+    chdir: "{{ worker_repo_dest }}"
+  register: git_update
+  changed_when: git_update.rc == 0
+
+- name: Create cluster config file for worker
+  template:
+    src: ../../common/templates/cluster-config.yml.j2
+    dest: "{{ cluster_config_path }}"
+    mode: '0644'
+
+- name: Create .env file for worker
+  template:
+    src: worker.env.j2
+    dest: "{{ worker_repo_dest }}/.env"
+    mode: '0644'
+
+- name: Build and start Docker containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ worker_repo_dest }}"
+    build: always
+    state: present
+  environment:
+    DOCKER_BUILDKIT: "{{ docker_buildkit }}"
+    GAMA_PATH: "{{ gama_platform_path }}"
+
+- name: Set permissions on gama-headless.sh in ags_dev_worker container
+  community.docker.docker_container_exec:
+    container: ags_dev_worker
+    command: chmod 777 /opt/gama-platform/headless/gama-headless.sh
+  register: chmod_result
+  failed_when: chmod_result.rc != 0
+
+- name: Display worker setup completion
+  debug:
+    msg:
+      - "Worker setup completed successfully"
+      - "Repository: {{ worker_repo_name }}"
+      - "Location: {{ worker_repo_dest }}"
+      - "GAMA_PATH: {{ gama_platform_path }}"
+      - "Node Name: {{ cluster_node_name }}"

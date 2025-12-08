@@ -1,0 +1,34 @@
+---
+- name: Check if GAMA is already installed
+  stat:
+    path: "{{ gama_install_directory }}/gama-platform"
+  register: gama_installed
+
+- name: Create GAMA directory
+  file:
+    path: "{{ gama_install_directory }}/gama-platform"
+    state: directory
+    mode: '0755'
+
+- name: Download GAMA platform
+  get_url:
+    url: "{{ gama_download_url }}"
+    dest: "{{ gama_install_directory }}/GAMA_{{ gama_version }}_Linux.zip"
+    mode: '0644'
+  when: not gama_installed.stat.exists
+
+- name: Extract GAMA platform
+  unarchive:
+    src: "{{ gama_install_directory }}/GAMA_{{ gama_version }}_Linux.zip"
+    dest: "{{ gama_install_directory }}/gama-platform"
+    remote_src: yes
+  when: not gama_installed.stat.exists
+
+- name: Remove GAMA zip file
+  file:
+    path: "{{ gama_install_directory }}/GAMA_{{ gama_version }}_Linux.zip"
+    state: absent
+
+- name: Display GAMA installation path
+  debug:
+    msg: "GAMA platform installed at {{ gama_install_directory }}/gama-platform"

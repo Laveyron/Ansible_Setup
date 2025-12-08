@@ -1,0 +1,82 @@
+---
+- name: Remove conflicting Docker packages
+  apt:
+    name:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+    purge: yes
+
+- name: Create directory for Docker GPG key
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download Docker GPG key
+  get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+
+- name: Get distribution codename
+  shell: . /etc/os-release && echo "$VERSION_CODENAME"
+  register: version_codename
+  changed_when: false
+
+- name: Get system architecture
+  command: dpkg --print-architecture
+  register: system_arch
+  changed_when: false
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch={{ system_arch.stdout }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ version_codename.stdout }} stable"
+    state: present
+    filename: docker
+
+- name: Update apt cache after adding Docker repo
+  apt:
+    update_cache: yes
+
+- name: Install Docker and related packages
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+  notify: Restart Docker
+
+- name: Ensure docker group exists
+  group:
+    name: docker
+    state: present
+
+- name: Add current user to docker group
+  user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+
+- name: Enable and start Docker service
+  systemd:
+    name: docker
+    enabled: yes
+    state: started
+
+- name: Display Docker version
+  command: docker --version
+  register: docker_version
+  changed_when: false
+
+- name: Show Docker version
+  debug:
+    msg: "{{ docker_version.stdout }}"

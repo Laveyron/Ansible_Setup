@@ -1,0 +1,6 @@
+---
+- name: Setup worker nodes
+  hosts: worker
+  become: yes
+  roles:
+    - worker

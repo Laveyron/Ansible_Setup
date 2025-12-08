@@ -1,0 +1,212 @@
+---
+# List projects (assumes projects already cloned by master role)
+- name: Check if projects directory exists
+  stat:
+    path: "{{ api_directory }}/projects"
+  register: projects_dir
+
+- name: Fail if projects directory does not exist
+  fail:
+    msg: "Projects directory not found. Run site.yml first to clone projects."
+  when: not projects_dir.stat.exists
+
+- name: List available projects in directory
+  shell: ls -1 "{{ api_directory }}/projects" | grep -v '^\.' | grep -v 'README'
+  register: available_projects
+  changed_when: false
+  failed_when: false
+
+- name: Check if any projects exist
+  fail:
+    msg: "No projects found in {{ api_directory }}/projects"
+  when: available_projects.stdout_lines | length == 0
+
+- name: Display available projects
+  debug:
+    msg:
+      - "========================================"
+      - "Available Projects"
+      - "========================================"
+      - "{{ available_projects.stdout_lines | join('\n') }}"
+      - "========================================"
+      - "Total: {{ available_projects.stdout_lines | length }} project(s)"
+      - "========================================"
+
+# Stop here if list_only mode
+- name: Stop here (list only mode)
+  meta: end_play
+  when: list_only
+
+# Continue with import process
+- name: Check if import script exists
+  stat:
+    path: "{{ api_directory }}/scripts/import-project.sh"
+  register: import_script
+
+- name: Fail if import script does not exist
+  fail:
+    msg: "Import script not found at {{ api_directory }}/scripts/import-project.sh"
+  when: not import_script.stat.exists
+
+- name: Make import script executable
+  file:
+    path: "{{ api_directory }}/scripts/import-project.sh"
+    mode: '0755'
+
+- name: Prompt for project name (if not provided)
+  pause:
+    prompt: "Enter the project name from the list above"
+  register: project_input
+  when: project_name == ''
+
+- name: Set project name from input
+  set_fact:
+    selected_project: "{{ project_input.user_input if project_name == '' else project_name }}"
+
+- name: Verify project exists
+  stat:
+    path: "{{ api_directory }}/projects/{{ selected_project }}"
+  register: project_exists
+
+- name: Fail if project does not exist
+  fail:
+    msg: "Project '{{ selected_project }}' does not exist in projects directory"
+  when: not project_exists.stat.exists
+
+- name: Run import project script
+  shell: |
+    echo "{{ selected_project }}" | ./scripts/import-project.sh
+  args:
+    chdir: "{{ api_directory }}"
+  register: import_result
+
+- name: Display import result
+  debug:
+    msg: "{{ import_result.stdout_lines }}"
+
+- name: Check if SQL file was generated
+  stat:
+    path: "{{ api_directory }}/{{ selected_project }}_insert.sql"
+  register: sql_file
+
+- name: Fail if SQL file was not generated
+  fail:
+    msg: "SQL file not generated. Check the import script output above."
+  when: not sql_file.stat.exists
+
+- name: Display SQL file location
+  debug:
+    msg: "SQL file generated at: {{ api_directory }}/{{ selected_project }}_insert.sql"
+
+- name: Display SQL file content (preview)
+  shell: head -20 "{{ selected_project }}_insert.sql"
+  args:
+    chdir: "{{ api_directory }}"
+  register: sql_preview
+  changed_when: false
+
+- name: Show SQL preview
+  debug:
+    msg: "{{ sql_preview.stdout_lines }}"
+
+- name: Check if database container is running
+  shell: docker ps --filter "name={{ db_container_name }}" --format "{{ '{{' }}.Names{{ '}}' }}"
+  register: db_container_check
+  changed_when: false
+  failed_when: false
+
+- name: Warn if database container not found
+  debug:
+    msg: "WARNING: Database container '{{ db_container_name }}' not found. Skipping database import."
+  when: db_container_check.stdout == ""
+
+- name: Check if admin user already exists
+  shell: |
+    docker exec {{ db_container_name }} mysql -u {{ mysql_user }} {{ mysql_database }} -p{{ mysql_password }} -e "SELECT COUNT(*) as count FROM users WHERE email='admin@uet.vn';"
+  register: admin_user_check
+  when: 
+    - db_container_check.stdout != ""
+    - import_to_db
+  changed_when: false
+  failed_when: false
+
+- name: Insert admin user if not exists
+  shell: |
+    docker exec {{ db_container_name }} mysql -u {{ mysql_user }} {{ mysql_database }} -p{{ mysql_password }} -e "INSERT INTO users (id, fullname, email, password, role, created_at, updated_at, created_by, updated_by) VALUES (1, 'admin', 'admin@uet.vn', '\$2a\$10\$KlieR6MHNv88eZYteM9b9eue.5Y1/okJyDUm9uzYIWqtMQJ2mDhNq', 1, '2024-09-01 10:30:00', '2024-09-01 10:30:00', 'admin@uet.vn', 'admin@uet.vn');"
+  when:
+    - db_container_check.stdout != ""
+    - import_to_db
+    - admin_user_check.stdout_lines | length > 1
+    - admin_user_check.stdout_lines[1] == "0"
+  register: admin_insert
+  failed_when: false
+
+# - name: Display admin user status
+#   debug:
+#     msg: "{{ 'Admin user inserted successfully' if (admin_insert is defined and admin_insert.rc == 0) else 'Admin user already exists or insert failed' }}"
+#   when: 
+#     - db_container_check.stdout != ""
+#     - import_to_db
+
+- name: Import SQL into database
+  shell: |
+    docker exec -i {{ db_container_name }} mysql -u {{ mysql_user }} {{ mysql_database }} -p{{ mysql_password }} < "{{ selected_project }}_insert.sql"
+  args:
+    chdir: "{{ api_directory }}"
+  register: sql_import
+  when: 
+    - db_container_check.stdout != ""
+    - import_to_db
+  failed_when: false
+
+- name: Display SQL import result
+  debug:
+    msg: 
+      - "SQL import status: {{ 'SUCCESS' if sql_import.rc == 0 else 'FAILED' }}"
+      - "{{ sql_import.stderr if sql_import.rc != 0 else 'Data imported successfully' }}"
+  when: sql_import is defined
+
+- name: Verify import - Count projects
+  shell: |
+    docker exec {{ db_container_name }} mysql -u {{ mysql_user }} {{ mysql_database }} -p{{ mysql_password }} -e "SELECT COUNT(*) as count FROM projects WHERE name='{{ selected_project }}';"
+  register: project_count
+  when: 
+    - sql_import is defined
+    - sql_import.rc == 0
+  changed_when: false
+  failed_when: false
+
+- name: Verify import - Count models
+  shell: |
+    docker exec {{ db_container_name }} mysql -u {{ mysql_user }} {{ mysql_database }} -p{{ mysql_password }} -e "SELECT COUNT(*) as count FROM models WHERE project_id=(SELECT id FROM projects WHERE name='{{ selected_project }}' LIMIT 1);"
+  register: model_count
+  when: 
+    - sql_import is defined
+    - sql_import.rc == 0
+  changed_when: false
+  failed_when: false
+
+- name: Verify import - Count experiments
+  shell: |
+    docker exec {{ db_container_name }} mysql -u {{ mysql_user }} {{ mysql_database }} -p{{ mysql_password }} -e "SELECT COUNT(*) as count FROM experiments WHERE project_id=(SELECT id FROM projects WHERE name='{{ selected_project }}' LIMIT 1);"
+  register: experiment_count
+  when: 
+    - sql_import is defined
+    - sql_import.rc == 0
+  changed_when: false
+  failed_when: false
+
+- name: Summary
+  debug:
+    msg:
+      - "============================================"
+      - "Project Import Summary"
+      - "============================================"
+      - "Project: {{ selected_project }}"
+      - "SQL file: {{ api_directory }}/{{ selected_project }}_insert.sql"
+      - "Database: {{ mysql_database }} on {{ db_container_name }}"
+      - "Database import: {{ 'SUCCESS' if (sql_import is defined and sql_import.rc == 0) else 'SKIPPED or FAILED' }}"
+      - "Projects imported: {{ project_count.stdout_lines[1] if project_count is defined else 'N/A' }}"
+      - "Models imported: {{ model_count.stdout_lines[1] if model_count is defined else 'N/A' }}"
+      - "Experiments imported: {{ experiment_count.stdout_lines[1] if experiment_count is defined else 'N/A' }}"
+      - "============================================"

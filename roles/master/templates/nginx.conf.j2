@@ -1,0 +1,25 @@
+upstream api_group {
+    server localhost:8080;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name localhost;
+
+    root /var/www/html/build;
+
+    location /api/ {
+        proxy_pass http://api_group;
+        proxy_redirect off;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-NginX-Proxy true;
+        client_max_body_size 11M;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html =404;
+    }
+}

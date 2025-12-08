@@ -1,0 +1,91 @@
+---
+- name: Validate projects_destination is set
+  fail:
+    msg: "projects_destination must be defined when using clone_projects role"
+  when: projects_destination == ""
+
+- name: Ensure projects directory exists
+  file:
+    path: "{{ projects_destination }}"
+    state: directory
+    mode: '0755'
+
+# Git
+- name: Extract repository name from URL
+  set_fact:
+    repo_name: "{{ projects_repo_url | basename | replace('.git', '') }}"
+  when: sync_method == "git"
+
+- name: Check if project repository already exists
+  stat:
+    path: "{{ projects_destination }}/{{ repo_name }}"
+  register: project_repo
+  when: sync_method == "git"
+
+- name: Clone project repository into projects directory
+  git:
+    repo: "{{ projects_repo_url }}"
+    dest: "{{ projects_destination }}/{{ repo_name }}"
+    version: "{{ projects_repo_branch }}"
+    force: no
+  when: not project_repo.stat.exists
+  when: sync_method == "git"
+
+- name: Update project repository (if exists)
+  shell: |
+    git fetch origin {{ projects_repo_branch }}
+    git reset --hard origin/{{ projects_repo_branch }}
+  args:
+    chdir: "{{ projects_destination }}/{{ repo_name }}"
+  when: project_repo.stat.exists
+  register: git_pull
+  changed_when: git_pull.rc == 0
+  when: sync_method == "git"
+
+- name: Display clone/update result
+  debug:
+    msg: "Project {{ repo_name }} {{ 'cloned to' if not project_repo.stat.exists else 'updated at' }} {{ projects_destination }}/{{ repo_name }}"
+  when: sync_method == "git"
+
+# Rsync
+- name: Validate local_projects_path for rsync
+  fail:
+    msg: "local_projects_path must be defined when using rsync method"
+  when:
+    - sync_method == "rsync"
+    - local_projects_path == ''
+
+- name: Sync projects using rsync
+  synchronize:
+    src: "{{ local_projects_path }}/"
+    dest: "{{ projects_destination }}/"
+    delete: "{{ rsync_delete }}"
+    recursive: yes
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=.gitignore"
+      - "--exclude=.settings/"
+      - "--exclude=results/"
+      - "--exclude=.project"
+      - "--exclude=.cache/"
+      - "--exclude=.metadata/"
+      - "--exclude=includes/data/farm_data/generated_farms_test.csv"
+      - "--exclude=includes/data/farm_data/generated_farms.csv"
+      - "--exclude=includes/output/"
+      - "--exclude=.DS_Store"
+  when: sync_method == "rsync"
+
+- name: Display rsync result
+  debug:
+    msg: "Projects synced from {{ local_projects_path }} to {{ projects_destination }}"
+  when: sync_method == "rsync"
+
+# Display results
+- name: List projects in directory
+  shell: ls -la "{{ projects_destination }}"
+  register: projects_list
+  changed_when: false
+
+- name: Show projects directory contents
+  debug:
+    msg: "{{ projects_list.stdout_lines }}"

@@ -1,0 +1,8 @@
+---
+api_directory: /var/www/html/agent_simulation_api
+db_container_name: "ags_dev_db"
+mysql_database: "ags"
+mysql_user: "agsuser"
+mysql_password: "mysql123456"
+import_to_db: true
+list_only: false

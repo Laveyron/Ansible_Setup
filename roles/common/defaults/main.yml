@@ -1,0 +1,8 @@
+---
+common_packages:
+  - wget
+  - unzip
+  - git
+  - ca-certificates
+  - curl
+  - rsync

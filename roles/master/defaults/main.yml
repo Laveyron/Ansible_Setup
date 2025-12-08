@@ -1,0 +1,17 @@
+---
+master_repo_url: https://github.com/dttrung257/agent_simulation_api
+master_repo_name: agent_simulation_api
+master_repo_dest: "{{ app_directory }}/{{ master_repo_name }}"
+gama_install_directory: "{{ master_repo_dest }}/gama"
+gama_platform_path: "{{ gama_install_directory }}/gama-platform"
+
+cluster_config_path: "{{ master_repo_dest }}/src/main/resources/cluster-config.yml"
+
+frontend_repo_url: https://github.com/dttrung257/agent_simulation_frontend
+frontend_repo_name: agent_simulation_frontend
+frontend_repo_dest: "{{ app_directory }}/{{ frontend_repo_name }}"
+nvm_version: v0.40.3
+node_version: "20"
+frontend_build_dest: "{{ app_directory }}/build"
+
+nginx_config_name: ags

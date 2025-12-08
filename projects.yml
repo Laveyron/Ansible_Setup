@@ -6,7 +6,7 @@
   vars:
     master_repo_dest: /var/www/html/agent_simulation_api
     worker_repo_dest: /var/www/html/agent_simulation_worker
-    sync_method: rsync
+    sync_method: git
   tasks:
     - name: Clone projects to master
       include_role:
@@ -31,4 +31,3 @@
     - name: Run import_project role
       include_role:
         name: import_project
-      when: not list_only | default(false)
